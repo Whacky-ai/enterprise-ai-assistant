@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>企业 AI 智能助手</title>
+    <style>
+        /* 装修部分:气泡颜色、圆角、布局 */
+        body { font-family: "Microsoft YaHei"; background: #f5f6fa; display: flex; flex-direction: column; align-items: center; padding-top: 40px; }
+        #chat { width: 640px; max-width: 90vw; background: #fff; border-radius: 12px; padding: 16px; min-height: 420px; box-shadow: 0 2px 8px rgba(0,0,0,.08); overflow-y: auto; }
+        .msg { margin: 10px 0; padding: 10px 14px; border-radius: 10px; max-width: 80%; white-space: pre-wrap; word-break: break-all; }
+        .user { background: #4a6cf7; color: #fff; margin-left: auto; }
+        .ai { background: #eef1f8; color: #222; }
+        #bar { display: flex; width: 640px; max-width: 90vw; margin-top: 12px; gap: 8px; }
+        #q { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 8px; }
+        #send { padding: 10px 18px; border: none; background: #4a6cf7; color: #fff; border-radius: 8px; cursor: pointer; }
+        /* 登录栏(新加) */
+        #loginbar { display: flex; gap: 8px; width: 640px; max-width: 90vw; margin-top: 8px; align-items: center; }
+        #loginbar input { padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+        #loginbar button { padding: 8px 14px; border: none; background: #2f5b8f; color: #fff; border-radius: 6px; cursor: pointer; }
+        #status { color: #666; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <h1>企业 AI 智能助手</h1>
+    <div id="loginbar">
+        <input id="uname" placeholder="用户名">
+        <input id="pwd" type="password" placeholder="密码">
+        <button id="login">登录</button>
+        <span id="status">未登录(普通问答)</span>
+    </div>
+    <div id="chat"></div>
+    <div id="bar">
+        <input id="q" placeholder="问问公司制度,比如:去广东出差住酒店一晚报销多少">
+        <button id="send">发送</button>
+    </div>
+    <script>
+        // ==================== 块1:拿元素 ====================
+        const qInput = document.getElementById("q");
+        const sendBtn = document.getElementById("send");
+        const chatBox = document.getElementById("chat");
+        // 登录栏元素 + 门票变量
+        const uname = document.getElementById("uname");
+        const pwd = document.getElementById("pwd");
+        const loginBtn = document.getElementById("login");
+        const status = document.getElementById("status");
+        let token = "";          // 门票:空 = 未登录
+
+        // ==================== 块2:造气泡 ====================
+        function addBubble(role, text) {
+            const div = document.createElement("div");
+            div.className = "msg " + role;
+            div.textContent = text;
+            chatBox.appendChild(div);
+            return div;
+        }
+
+        // ==================== 块3:登录(拿门票) ====================
+        loginBtn.onclick = async function () {
+            const resp = await fetch("/api/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username: uname.value, password: pwd.value })
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                token = data.token;
+                pwd.value = "";
+                status.textContent = "已登录:" + uname.value + "(智能问答)";
+            } else {
+                status.textContent = "用户名或密码错误";
+            }
+        };
+
+        // ==================== 块4:发送(按登录状态分流) ====================
+        sendBtn.onclick = async function () {
+            const question = qInput.value;
+            if (!question) return;
+            qInput.value = "";
+            addBubble("user", question);
+            const aiBubble = addBubble("ai", "");
+
+            if (token) {
+                // ---- 智能模式:带通行证走 Agent 接口(整箱快递) ----
+                const resp = await fetch("/api/chat/agent", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + token   // 通行证!门卫验的就是它
+                    },
+                    body: JSON.stringify({ question: question, session_id: "web-demo" })
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    aiBubble.textContent = data.answer;
+                } else if (resp.status == 401) {
+                    aiBubble.textContent = "门票失效,请重新登录";
+                    token = "";
+                    status.textContent = "未登录(普通问答)";
+                } else {
+                    aiBubble.textContent = "服务开小差了,去看看 uvicorn 终端报错";
+                }
+            } else {
+                // ---- 普通模式:流式水管(原来的路) ----
+                const resp = await fetch("/api/chat/stream", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ question: question })
+                });
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const events = buffer.split("\n\n");
+                    buffer = events.pop();
+                    for (const ev of events) {
+                        if (ev.startsWith("data:")) {
+                            aiBubble.textContent += ev.slice(5).trim();
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+</body>
+</html>

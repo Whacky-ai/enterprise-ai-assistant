@@ -1,0 +1,41 @@
+services:
+  mysql:                                    # ① 档案室楼
+    image: mysql:8.0                        # 用官方现成镜像
+    environment:                            # 镜像的"开关"
+      MYSQL_ROOT_PASSWORD: "110515"         # 必填:root 密码(不填容器拒绝启动)
+      MYSQL_DATABASE: assistant_db          # 顺手自动建库
+    ports:
+      - "3307:3306"                         # 宿主3307 ↔ 容器3306
+    volumes:
+      - mysql_data:/var/lib/mysql           # 保险柜:数据落地,删容器不丢数据
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro   # 自动建表脚本
+
+  redis:                                    # ② 速记本楼
+    image: redis:7                          # 官方 Linux Redis 7(没 HELLO 坑!)
+    ports:
+      - "6378:6379"
+
+  web:                                      # ③ 应用楼(现盖)
+    build: .                                # 按本目录的 Dockerfile 盖
+    ports:
+      - "8000:8000"
+    environment:                            # 环境变量覆盖 → config.py 伏笔收割
+      MYSQL_HOST: mysql                     # 关键!服务名当地址,不是 127.0.0.1
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: "110515"
+      MYSQL_DB: assistant_db
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}   # 从宿主 .env 透传,密钥不进镜像
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_EXPIRE_MINUTES: "120"
+    depends_on:                             # 启动顺序:先起两栋服务楼
+      - mysql
+      - redis
+    volumes:
+      - ./chroma_data:/app/chroma_data      # 复用本机向量库,零迁移
+      - ./attendance.db:/app/attendance.db  # 复用本机考勤库,零迁移
+
+volumes:
+  mysql_data:                               # 声明命名卷(保险柜要先登记)
